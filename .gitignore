@@ -22,3 +22,6 @@ talosconfig
 
 # Pulumi stack files
 Pulumi.*.yaml
+
+# Ignore VHD files
+*.vhd
