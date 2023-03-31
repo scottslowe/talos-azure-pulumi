@@ -20,6 +20,7 @@ func main() {
 		talosImageId := cfg.Require("imageId")
 
 		// Create a resource group for the Talos Linux resources
+		// Details: https://www.pulumi.com/registry/packages/azure/api-docs/core/resourcegroup/
 		talosRg, err := core.NewResourceGroup(ctx, "talos-rg", &core.ResourceGroupArgs{
 			Name: pulumi.String("talos-rg"),
 		})
@@ -27,7 +28,8 @@ func main() {
 			log.Printf("error creating resource group: %s", err.Error())
 		}
 
-		// Create a Vnet
+		// Create a virtual network
+		// Details: https://www.pulumi.com/registry/packages/azure/api-docs/network/virtualnetwork/
 		talosVnet, err := network.NewVirtualNetwork(ctx, "talos-vnet", &network.VirtualNetworkArgs{
 			AddressSpaces: pulumi.StringArray{
 				pulumi.String("10.0.0.0/16"),
@@ -40,6 +42,7 @@ func main() {
 		}
 
 		// Create three subnets
+		// Details: https://www.pulumi.com/registry/packages/azure/api-docs/network/subnet/
 		talosSubnetIds := make([]pulumi.StringInput, 3)
 		for i := 0; i < 3; i++ {
 			subnet, err := network.NewSubnet(ctx, fmt.Sprintf("subnet-0%d", i+1), &network.SubnetArgs{
@@ -56,6 +59,7 @@ func main() {
 		}
 
 		// Create a network security group and associated rules
+		// Details: https://www.pulumi.com/registry/packages/azure/api-docs/network/networksecuritygroup/
 		talosNsg, err := network.NewNetworkSecurityGroup(ctx, "talos-nsg", &network.NetworkSecurityGroupArgs{
 			Name:              pulumi.String("talos-nsg"),
 			ResourceGroupName: talosRg.Name,
@@ -111,6 +115,7 @@ func main() {
 		}
 
 		// Create a public IP address for the load balancer
+		// Details: https://www.pulumi.com/registry/packages/azure/api-docs/network/publicip/
 		talosLbPubIp, err := network.NewPublicIp(ctx, "talos-lb-pub-ip", &network.PublicIpArgs{
 			AllocationMethod:  pulumi.String("Static"),
 			Name:              pulumi.String("talos-lb-pub-ip"),
@@ -122,6 +127,7 @@ func main() {
 		}
 
 		// Create a load balancer (only used for K8s API traffic)
+		// Details: https://www.pulumi.com/registry/packages/azure/api-docs/lb/loadbalancer/
 		talosLb, err := lb.NewLoadBalancer(ctx, "talos-lb", &lb.LoadBalancerArgs{
 			FrontendIpConfigurations: &lb.LoadBalancerFrontendIpConfigurationArray{
 				&lb.LoadBalancerFrontendIpConfigurationArgs{
@@ -138,6 +144,7 @@ func main() {
 		}
 
 		// Create a backend address pool
+		// Details: https://www.pulumi.com/registry/packages/azure/api-docs/lb/backendaddresspool/
 		talosBePool, err := lb.NewBackendAddressPool(ctx, "talos-be-pool", &lb.BackendAddressPoolArgs{
 			LoadbalancerId: talosLb.ID(),
 			Name:           pulumi.String("talos-be-pool"),
@@ -147,6 +154,7 @@ func main() {
 		}
 
 		// Create a health probe for the load balancer
+		// Details: https://www.pulumi.com/registry/packages/azure/api-docs/lb/probe/
 		_, err = lb.NewProbe(ctx, "talos-lb-probe", &lb.ProbeArgs{
 			LoadbalancerId: talosLb.ID(),
 			Port:           pulumi.Int(6443),
@@ -158,6 +166,7 @@ func main() {
 		}
 
 		// Create a load balancing rule for K8s API traffic
+		// Details: https://www.pulumi.com/registry/packages/azure/api-docs/lb/rule/
 		_, err = lb.NewRule(ctx, "talos-lb-rule", &lb.RuleArgs{
 			DisableOutboundSnat:         pulumi.Bool(true),
 			EnableTcpReset:              pulumi.Bool(true),
@@ -191,6 +200,7 @@ func main() {
 			cpPublicIpIds[i] = publicIp.ID()
 
 			// Create the network interface
+			// Details: https://www.pulumi.com/registry/packages/azure/api-docs/network/networkinterface/
 			ni, err := network.NewNetworkInterface(ctx, fmt.Sprintf("cp-ni-0%d", i+1), &network.NetworkInterfaceArgs{
 				IpConfigurations: &network.NetworkInterfaceIpConfigurationArray{
 					&network.NetworkInterfaceIpConfigurationArgs{
@@ -208,6 +218,7 @@ func main() {
 			cpIntfIds[i] = ni.ID()
 
 			// Associate the NI to the NSG
+			// Details: https://www.pulumi.com/registry/packages/azure/api-docs/network/networkinterfacesecuritygroupassociation/
 			_, err = network.NewNetworkInterfaceSecurityGroupAssociation(ctx, fmt.Sprintf("ni-nsg-0%d", i+1), &network.NetworkInterfaceSecurityGroupAssociationArgs{
 				NetworkInterfaceId:     ni.ID(),
 				NetworkSecurityGroupId: talosNsg.ID(),
@@ -217,6 +228,7 @@ func main() {
 			}
 
 			// Add the NI to the backend address pool
+			// Details: https://www.pulumi.com/registry/packages/azure/api-docs/network/networkinterfacebackendaddresspoolassociation/
 			_, err = network.NewNetworkInterfaceBackendAddressPoolAssociation(ctx, fmt.Sprintf("ni-bepool-0%d", i+1), &network.NetworkInterfaceBackendAddressPoolAssociationArgs{
 				BackendAddressPoolId: talosBePool.ID(),
 				IpConfigurationName:  pulumi.Sprintf("cp-ni-0%d", i+1),
@@ -228,12 +240,14 @@ func main() {
 		}
 
 		// Start building the Talos configuration by generating new machine secrets
+		// Details: https://github.com/siderolabs/pulumi-provider-talos/blob/main/sdk/go/talos/talosMachineSecrets.go
 		talosMs, err := talos.NewTalosMachineSecrets(ctx, "talos-ms", nil)
 		if err != nil {
 			log.Printf("error creating machine secrets: %s", err.Error())
 		}
 
 		// Create the talosctl configuration file
+		// Details: https://github.com/siderolabs/pulumi-provider-talos/blob/main/sdk/go/talos/talosClientConfiguration.go
 		talosClientCfg, err := talos.NewTalosClientConfiguration(ctx, "talos-client-cfg", &talos.TalosClientConfigurationArgs{
 			ClusterName:    pulumi.String("talos-cluster"),
 			MachineSecrets: talosMs.MachineSecrets,
@@ -245,6 +259,7 @@ func main() {
 		}
 
 		// Create the machine configuration for the control plane VMs
+		// Details: https://github.com/siderolabs/pulumi-provider-talos/blob/main/sdk/go/talos/talosMachineConfigurationControlplane.go
 		talosCpMachineCfg, err := talos.NewTalosMachineConfigurationControlplane(ctx, "talos-cp-machine-cfg", &talos.TalosMachineConfigurationControlplaneArgs{
 			ClusterName:     talosClientCfg.ClusterName,
 			ClusterEndpoint: pulumi.Sprintf("https://%v:6443", talosLbPubIp.IpAddress),
@@ -257,6 +272,7 @@ func main() {
 		}
 
 		// Create the machine configuration for the worker VMs
+		// Details: https://github.com/siderolabs/pulumi-provider-talos/blob/main/sdk/go/talos/talosMachineConfigurationWorker.go
 		talosWkrMachineCfg, err := talos.NewTalosMachineConfigurationWorker(ctx, "talos-wkr-machine-cfg", &talos.TalosMachineConfigurationWorkerArgs{
 			ClusterName:     talosClientCfg.ClusterName,
 			ClusterEndpoint: pulumi.Sprintf("https://%v:6443", talosLbPubIp.IpAddress),
@@ -269,6 +285,7 @@ func main() {
 		}
 
 		// Create an availability set for the control plane
+		// Details: https://www.pulumi.com/registry/packages/azure/api-docs/compute/availabilityset/
 		talosCpAvailSet, err := compute.NewAvailabilitySet(ctx, "talos-cp-avail-set", &compute.AvailabilitySetArgs{
 			ResourceGroupName: talosRg.Name,
 		})
@@ -277,6 +294,7 @@ func main() {
 		}
 
 		// Launch the VMs for the control plane
+		// Details: https://www.pulumi.com/registry/packages/azure/api-docs/compute/virtualmachine/
 		cpVmIds := make([]pulumi.StringInput, 3)
 		for i := 0; i < 3; i++ {
 			vm, err := compute.NewVirtualMachine(ctx, fmt.Sprintf("talos-cp-0%d", i+1), &compute.VirtualMachineArgs{
@@ -370,6 +388,7 @@ func main() {
 		}
 
 		// Bootstrap the first control plane node
+		// Details: https://github.com/siderolabs/pulumi-provider-talos/blob/main/sdk/go/talos/talosMachineBootstrap.go
 		_, err = talos.NewTalosMachineBootstrap(ctx, "bootstrap", &talos.TalosMachineBootstrapArgs{
 			TalosConfig: talosClientCfg.TalosConfig,
 			Endpoint:    cpPublicIps[0],
@@ -380,10 +399,13 @@ func main() {
 		}
 
 		// Export the Talos client configuration
-		// ctx.Export("talosStorageName", talosStorage.Name)
 		ctx.Export("talosctlCfg", talosClientCfg.TalosConfig)
-		ctx.Export("talosKubeLbIp", talosLbPubIp.IpAddress)
-		ctx.Export("talosCpMachineConfig", talosCpMachineCfg.MachineConfig)
+
+		// Uncomment the following lines for additional outputs that may be useful for troubleshooting/diagnostics
+		// ctx.Export("talosKubeLbIp", talosLbPubIp.IpAddress)
+		// ctx.Export("talosCpMachineConfig", talosCpMachineCfg.MachineConfig)
+		// ctx.Export("talosWkrMachineConfig", talosWkrMachineCfg.MachineConfig)
+		// ctx.Export("talosSecrets", talosMs.MachineSecrets)
 
 		return nil
 	})
